@@ -19,8 +19,15 @@ EXCLUDE_TABLES_QUEUE=()
 EXCLUDE_TABLES_LOG_CACHE_SERVIZIO=()
 EXCLUDE_TABLES_STORICO=()
 EXCLUDE_TABLES_STATISTICHE=()
-EXCLUDE_TABLES_CUSTOM=()
 EXCLUDE_TABLES=()
+
+#IMPORT DB CONFIGURATION. DEFAULT IS THE SAME OF THE EXPORT. IF YOU OVVERRIDE FOR EXAMPLE THE USER YOU NEED TO SET ALSO THE IMPORT_DBUSER IN THE CONFIG
+IMPORT_DBUSER="$DBUSER"
+IMPORT_DBPASS="$DBPASS"
+IMPORT_DBPORT="$DBPORT"
+IMPORT_DBHOST="$DBHOST"
+
+IMPORT_OPTION="default"
 
 # Verifico le opzioni inserite da linea di comando
 while [[ $# -gt 0 ]]; do
@@ -73,6 +80,7 @@ else
    echo "Could not load settings from $CONFIG_FILE (file does not exist), script use default settings."
 fi
 
+#INIZIO MYSQL EXPORT CONFIGURATION
 MYSQLCOMMAND="$MYSQLBIN"
 MYSQLCONFIG=""
 if [ ! -z $DBUSER ]; then
@@ -92,7 +100,29 @@ if [ "$DBHOST" != "" ]; then
 fi
 
 MYSQLCOMMAND+="$MYSQLCONFIG"
+#FINE MYSQL EXPORT CONFIGURATION
+#INIZIO MYSQL IMPORT CONFIGURATION
+MYSQLIMPORTCOMMAND="$MYSQLBIN"
+MYSQLIMPORTCONFIG=""
 
+if [ ! -z $IMPORT_DBUSER ]; then
+    MYSQLIMPORTCONFIG+=" -u$IMPORT_DBUSER"
+fi
+
+if [ ! -z $IMPORT_DBPASS ]; then
+    MYSQLIMPORTCONFIG+=" -p$IMPORT_DBPASS"
+fi
+echo $IMPORT_DBPORT;
+if [ "$IMPORT_DBPORT" != "3306" ]; then
+    MYSQLIMPORTCONFIG+=" --port=$IMPORT_DBPORT"
+fi
+
+if [  "$IMPORT_DBHOST" != "" ]; then
+    MYSQLIMPORTCONFIG+=" -h$IMPORT_DBHOST"
+fi
+
+MYSQLIMPORTCOMMAND+="$MYSQLIMPORTCONFIG"
+#FINE MYSQL IMPORT CONFIGURATION
 echo "retrieve databases..."
 echo $MYSQLCOMMAND
 DBNAMES=`echo "show databases" |$MYSQLCOMMAND | egrep -v "Database|information_schema"`
@@ -168,7 +198,28 @@ for database in $DBNAMES; do
 		else
 			echo "sql file doesn't exists or has zero bytes, remove it"
 			rm -f $DEFPATH/data/$database/$database-$DATA-dump.sql
-		fi	
+		fi
+
+		if [ "$IMPORT_OPTION" == "default" ] ; then
+		      IMPORT_DB="gescat_test"
+          echo "Unzipping and importing... $DEFPATH/data/$database/$database-$DATA-dump.sql.gz"
+          gunzip -c "$DEFPATH/data/$database/$database-$DATA-dump.sql.gz" | $MYSQLIMPORTCOMMAND "$IMPORT_DB"
+          CANCEL_SCRIPT_PATH="opzione_cancellazione"
+              if [[ -d "$CANCEL_SCRIPT_PATH" ]]; then
+                  for script in "$CANCEL_SCRIPT_PATH"/*.sql; do
+                      if [[ -f "$script" ]]; then
+                          echo "Eseguendo script: $script"
+                          $MYSQLIMPORTCOMMAND $IMPORT_DB < "$script"
+                      fi
+                  done
+              fi
+          echo "Exporting cleaned database..."
+          CLEANED_BACKUP="$DEFPATH/data/$IMPORT_DB/$IMPORT_DB-$DATA-cleaned.sql.gz"
+          mkdir -p "$DEFPATH/data/$IMPORT_DB"
+          echo "$MYSQLDUMPBIN $MYSQLIMPORTCONFIG $IMPORT_DB | /bin/gzip > $CLEANED_BACKUP"
+          $MYSQLDUMPBIN $MYSQLIMPORTCONFIG $IMPORT_DB | /bin/gzip > "$CLEANED_BACKUP"
+    fi
+
 		
 		_now=$(date +%Y-%m-%d.%H.%M.%S)
 		echo "Backup db name $database finish at $_now"
