@@ -367,7 +367,7 @@ for database in $DBNAMES; do
     # max_connections quando EXCLUDE_TABLES e' lungo.
     {
         if [ ${#EXCLUDE_TABLES[@]} -gt 0 ]; then
-            $MYSQLDUMPBIN $MYSQLCONFIG --single-transaction --no-data $database "${EXCLUDE_TABLES[@]}"
+            $MYSQLDUMPBIN $MYSQLCONFIG $DBOPTION --no-data $database "${EXCLUDE_TABLES[@]}"
         fi
         $MYSQLDUMPBIN $MYSQLCONFIG $DBOPTION $EXCLUDE_PARAMS $database
     } | gzip > "$BACKUP_FILE"
@@ -426,7 +426,7 @@ if [ "$CREATE_DATABASE_TEST" = true ]; then
         # Dump compresso: pipe diretta a gzip
         {
             if [ ${#EXCLUDE_TABLES[@]} -gt 0 ]; then
-                $MYSQLDUMPBIN $MYSQLCONFIG --single-transaction --no-data $database "${EXCLUDE_TABLES[@]}"
+                $MYSQLDUMPBIN $MYSQLCONFIG $DBOPTION --no-data $database "${EXCLUDE_TABLES[@]}"
             fi
             $MYSQLDUMPBIN $MYSQLCONFIG $DBOPTION $EXCLUDE_PARAMS $database
         } | gzip > "$TEMP_SQL_FILE"
@@ -434,7 +434,7 @@ if [ "$CREATE_DATABASE_TEST" = true ]; then
         # Dump non compresso
         {
             if [ ${#EXCLUDE_TABLES[@]} -gt 0 ]; then
-                $MYSQLDUMPBIN $MYSQLCONFIG --single-transaction --no-data $database "${EXCLUDE_TABLES[@]}"
+                $MYSQLDUMPBIN $MYSQLCONFIG $DBOPTION --no-data $database "${EXCLUDE_TABLES[@]}"
             fi
             $MYSQLDUMPBIN $MYSQLCONFIG $DBOPTION $EXCLUDE_PARAMS $database
         } > "$TEMP_SQL_FILE"
