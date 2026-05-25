@@ -362,10 +362,13 @@ for database in $DBNAMES; do
     done
 
     # Dump completo con schema per le tabelle escluse
+    # Schema delle tabelle escluse in UNA sola invocazione di mysqldump (passa le tabelle come
+    # argomenti posizionali), invece di una connessione per tabella: evita di saturare
+    # max_connections quando EXCLUDE_TABLES e' lungo.
     {
-        for table in "${EXCLUDE_TABLES[@]}"; do
-            $MYSQLDUMPBIN $MYSQLCONFIG --no-data $database $table
-        done
+        if [ ${#EXCLUDE_TABLES[@]} -gt 0 ]; then
+            $MYSQLDUMPBIN $MYSQLCONFIG --single-transaction --no-data $database "${EXCLUDE_TABLES[@]}"
+        fi
         $MYSQLDUMPBIN $MYSQLCONFIG $DBOPTION $EXCLUDE_PARAMS $database
     } | gzip > "$BACKUP_FILE"
 
@@ -417,20 +420,22 @@ if [ "$CREATE_DATABASE_TEST" = true ]; then
     fi
 
     echo "Dumping production database $database to temp file..."
+    # Schema delle tabelle escluse in UNA sola invocazione di mysqldump (stessa logica del
+    # backup standard sopra) per non saturare max_connections.
     if [ "$TEMP_USE_GZIP" = true ]; then
         # Dump compresso: pipe diretta a gzip
         {
-            for table in "${EXCLUDE_TABLES[@]}"; do
-                $MYSQLDUMPBIN $MYSQLCONFIG --no-data $database $table
-            done
+            if [ ${#EXCLUDE_TABLES[@]} -gt 0 ]; then
+                $MYSQLDUMPBIN $MYSQLCONFIG --single-transaction --no-data $database "${EXCLUDE_TABLES[@]}"
+            fi
             $MYSQLDUMPBIN $MYSQLCONFIG $DBOPTION $EXCLUDE_PARAMS $database
         } | gzip > "$TEMP_SQL_FILE"
     else
         # Dump non compresso
         {
-            for table in "${EXCLUDE_TABLES[@]}"; do
-                $MYSQLDUMPBIN $MYSQLCONFIG --no-data $database $table
-            done
+            if [ ${#EXCLUDE_TABLES[@]} -gt 0 ]; then
+                $MYSQLDUMPBIN $MYSQLCONFIG --single-transaction --no-data $database "${EXCLUDE_TABLES[@]}"
+            fi
             $MYSQLDUMPBIN $MYSQLCONFIG $DBOPTION $EXCLUDE_PARAMS $database
         } > "$TEMP_SQL_FILE"
     fi
@@ -442,22 +447,26 @@ if [ "$CREATE_DATABASE_TEST" = true ]; then
     fi
     echo "Dump completed: $TEMP_SQL_FILE"
 
-    # Step 2: Drop di tutte le tabelle e viste nel database di test
-    # Disabilita FK per evitare errori di dipendenza tra tabelle
+    # Step 2: Drop di tutte le tabelle e viste nel database di test in UNA sola connessione.
+    # Le SHOW FULL TABLES restano in connessioni separate (servono per leggere la lista prima
+    # di emettere i DROP). Tutti i DROP vengono poi inviati come singolo script via stdin: con
+    # N+ tabelle questo riduce N+3 connessioni a 3 totali, evitando "too many connections".
+    # Bonus: in una sessione unica SET FOREIGN_KEY_CHECKS=0 e' effettivo per tutti i DROP
+    # (nel loop precedente la variabile veniva persa subito perche' di sessione).
     echo "Cleaning test database $TEST_DATABASE_NAME..."
-    $MYSQLCOMMAND $TEST_DATABASE_NAME -e "SET FOREIGN_KEY_CHECKS=0"
-
     VIEWS=$($MYSQLCOMMAND $TEST_DATABASE_NAME -e "SHOW FULL TABLES WHERE Table_type='VIEW'" -N | awk '{print $1}')
-    for view in $VIEWS; do
-        $MYSQLCOMMAND $TEST_DATABASE_NAME -e "DROP VIEW IF EXISTS \`$view\`"
-    done
-
     TABLES=$($MYSQLCOMMAND $TEST_DATABASE_NAME -e "SHOW FULL TABLES WHERE Table_type='BASE TABLE'" -N | awk '{print $1}')
-    for table in $TABLES; do
-        $MYSQLCOMMAND $TEST_DATABASE_NAME -e "DROP TABLE IF EXISTS \`$table\`"
-    done
 
-    $MYSQLCOMMAND $TEST_DATABASE_NAME -e "SET FOREIGN_KEY_CHECKS=1"
+    {
+        echo "SET FOREIGN_KEY_CHECKS=0;"
+        for view in $VIEWS; do
+            echo "DROP VIEW IF EXISTS \`$view\`;"
+        done
+        for table in $TABLES; do
+            echo "DROP TABLE IF EXISTS \`$table\`;"
+        done
+        echo "SET FOREIGN_KEY_CHECKS=1;"
+    } | $MYSQLCOMMAND $TEST_DATABASE_NAME
 
     # Step 3: Import del dump nel database di test
     # Se il dump e' compresso, decomprime al volo con gunzip durante l'import
